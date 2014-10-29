@@ -1,14 +1,16 @@
-//-----------------------------------------------------------------------------
-// ser2eth using STM32F100, ENC28J60, lwIP and enc28j60driver by chrysn
-//
-// lwIP: 
-// http://savannah.nongnu.org/projects/lwip/
-//
-// ebc28j60 driver: 
-// https://gitorious.org/enc28j60driver/enc28j60driver/source/66df3dbaa2e4ebacd58b2fe014cc597538a2ca9a:
-//
-//                               20.dec.2013, Matej Kogovsek, matej@hamradio.si
-//-----------------------------------------------------------------------------
+/**
+ser2eth using STM32F100, ENC28J60, lwIP and enc28j60driver by chrysn
+
+lwIP:
+http://savannah.nongnu.org/projects/lwip/
+
+ebc28j60 driver:
+https://gitorious.org/enc28j60driver/enc28j60driver/source/66df3dbaa2e4ebacd58b2fe014cc597538a2ca9a:
+
+@file		main.c
+@author		Matej Kogovsek (matej@hamradio.si)
+@copyright	GPL v2
+*/
 
 #include "stm32f10x.h"
 
@@ -22,6 +24,7 @@
 #include "lwip/timers.h"
 #include "lwip/tcp.h"
 #include "lwip/dhcp.h"
+#include "lwip/dns.h"
 #include "netif/mchdrv.h"
 #include "netif/etharp.h"
 #include "enc28j60.h"
@@ -76,7 +79,7 @@ uint8_t enchw_exchangebyte(enchw_device_t *dev, uint8_t byte) { return spi_rw(EN
 void _exit(int status)
 {
 	ser_printf("_exit called!\r\n");
-	while(1) {} 
+	while(1) {}
 }
 
 //-----------------------------------------------------------------------------
@@ -115,13 +118,13 @@ void ser_putip(const uint8_t n, uint32_t a)
 
 uint32_t udtoi(const char* s) {	// unsigned decimal string to u32
 	uint32_t x = 0;
-	
+
 	while( isdigit((int)*s) ) {
 		x *= 10;
 		x += *s - '0';
 		++s;
 	}
-	
+
 	return x;
 }
 
@@ -129,7 +132,7 @@ uint8_t parse_ip(const char* s, uint32_t* a)
 {
 	uint8_t i;
 	uint32_t ip[4];
-	
+
 	for( i = 0; i < 4; ++i ) {
 		ip[i] = udtoi(s);
 		if( ip[i] > 255 ) return 1;
@@ -138,9 +141,9 @@ uint8_t parse_ip(const char* s, uint32_t* a)
 		if( !s ) return 1;
 		++s;
 	}
-	
+
 	*a = (ip[0]) | (ip[1] << 8) | (ip[2] << 16) | (ip[3] << 24);
-	
+
 	return 0;
 }
 
@@ -158,7 +161,7 @@ uint8_t parse_port(const char* s, uint16_t* a)
 
 u32_t sys_now(void)
 {
-	return msTicks; 
+	return msTicks;
 }
 
 err_t lwip_tcp_event(void *arg, struct tcp_pcb *pcb, enum lwip_event ev, struct pbuf *p, u16_t size, err_t err)
@@ -168,17 +171,17 @@ err_t lwip_tcp_event(void *arg, struct tcp_pcb *pcb, enum lwip_event ev, struct 
 		ser_puts(AT_CMD_UART, "+LWIP: ACCEPT\r\n");
 		LWIP_PLATFORM_DIAG(("tcp: accept\r\n"));
 	} else
-	
+
 	if( ev == LWIP_EVENT_SENT ) {
 		LWIP_PLATFORM_DIAG(("tcp: sent %d\r\n", size));
 	} else
-	
+
 	if( ev == LWIP_EVENT_RECV ) {
 		if( p != 0 ) {
 			ser_putsn(AT_CMD_UART, p->payload, p->len);
 			LWIP_PLATFORM_DIAG(("tcp: recv %d\r\n", p->len));
+			tcp_recved(pcb, p->len);
 			pbuf_free(p);
-			tcp_recved(pcb, size);
 		} else {
 			tpcb = 0;
 			ser_puts(AT_CMD_UART, "+LWIP: CLOSE\r\n");
@@ -188,30 +191,41 @@ err_t lwip_tcp_event(void *arg, struct tcp_pcb *pcb, enum lwip_event ev, struct 
 			}*/
 		}
 	} else
-	
+
 	if( ev == LWIP_EVENT_CONNECTED ) {
 		ser_puts(AT_CMD_UART, "+LWIP: CONNECT\r\n");
 		LWIP_PLATFORM_DIAG(("tcp: connect\r\n"));
 	} else
-	
+
 	if( ev == LWIP_EVENT_POLL ) {
 		// do nothing
 	} else
-	
+
 	if( ev == LWIP_EVENT_ERR ) {
 		LWIP_PLATFORM_DIAG(("tcp: error %d occured\r\n", err));
-	} else 
-	
+	} else
+
 	{
 		LWIP_PLATFORM_DIAG(("tcp: event %d occured\r\n", ev));
 	}
-	
+
 	return ERR_OK;
 }
 
 void mch_status_callback(struct netif *netif)
 {
 	ser_puts(AT_CMD_UART, "+LWIP: IFSTAT\r\n");
+}
+
+void dns_found_cb(const char *name, ip_addr_t *ipaddr, void *callback_arg)
+{
+	ser_puts(AT_CMD_UART, "+LWIPDNS: ");
+	if( ipaddr ) {
+		ser_putip(AT_CMD_UART, ipaddr->addr);
+	} else {
+		ser_puts(AT_CMD_UART, "?");
+	}
+	ser_puts(AT_CMD_UART, "\r\n");
 }
 
 //-----------------------------------------------------------------------------
@@ -227,24 +241,24 @@ uint8_t proc_at_cmd(const char* s)
 	if( 0 == strcmp(s, "AT") ) {
 		return 0;
 	}
-	
+
 	if( 0 == strcmp(s, "ATE0") ) {
 		at_echo = 0;
 		return 0;
 	}
-	
+
 	if( 0 == strcmp(s, "ATE1") ) {
 		at_echo = 1;
 		return 0;
 	}
-	
+
 	if( 0 == strcmp(s, "ATI") ) {
-		ser_puts(AT_CMD_UART, "MK ser2eth v1.0\r\n");
+		ser_puts(AT_CMD_UART, "MK ser2eth v1.1\r\n");
 		return 0;
 	}
-	
+
 	// lwIP init
-	
+
 	if( 0 == strcmp(s, "AT+LWIPINIT") ) {
 		if( lwip_init_done ) return 1;
 		lwip_init();
@@ -256,8 +270,8 @@ uint8_t proc_at_cmd(const char* s)
 	}
 
 	// all subsequent lwip commands require initialized lwip
-	if( !lwip_init_done ) return 1;	
-	
+	if( !lwip_init_done ) return 1;
+
 	// lwip IF commands
 
 	if( 0 == strcmp(s, "AT+LWIPMAC=?") ) {
@@ -282,7 +296,7 @@ uint8_t proc_at_cmd(const char* s)
 		ser_puts(AT_CMD_UART, "\r\n");
 		return 0;
 	}
-	
+
 	if( 0 == strcmp(s, "AT+LWIPNM=?") ) {
 		ser_puts(AT_CMD_UART, "+LWIPNM: ");
 		ser_putip(AT_CMD_UART, mchdrv_netif.netmask.addr);
@@ -295,60 +309,60 @@ uint8_t proc_at_cmd(const char* s)
 		ser_putip(AT_CMD_UART, mchdrv_netif.gw.addr);
 		ser_puts(AT_CMD_UART, "\r\n");
 		return 0;
-	}	
-	
+	}
+
 	// lwIP TCP commands
-	
-	char lwipconnect[] = "AT+LWIPCONNECT="; 
-	
+
+	char lwipconnect[] = "AT+LWIPCONNECT=";
+
 	if( 0 == strncmp(s, lwipconnect, strlen(lwipconnect)) ) {
 		if( tpcb ) return 1;
-		
+
 		s += strlen(lwipconnect);
 		struct ip_addr ip;
 		if( parse_ip(s, &(ip.addr)) ) return 1;
-		
+
 		uint16_t dstport;
 		s = strchr(s, ',');
 		if( !s ) return 1;
 		++s;
 		if( parse_port(s, &dstport) ) return 1;
-		
+
 		uint16_t srcport = 0;
 		s = strchr(s, ',');
 		if( s ) {
 			++s;
 			if( parse_port(s, &srcport) ) return 1;
 		}
-		
+
 		tpcb = tcp_new();
 		if( 0 == tpcb ) return 1;
 		if( srcport ) {
 			if( ERR_OK != tcp_bind(tpcb, IP_ADDR_ANY, srcport) ) return 1;
 		}
 		if( ERR_OK != tcp_connect(tpcb, &ip, dstport, 0) ) return 1;
-		
+
 		return 0;
 	}
-	
+
 	char lwiplisten[] = "AT+LWIPLISTEN=";
-	
+
 	if( 0 == strncmp(s, lwiplisten, strlen(lwiplisten)) ) {
 		if( tpcb ) return 1;
-		
+
 		s += strlen(lwiplisten);
 		uint16_t srcport;
 		if( parse_port(s, &srcport) ) return 1;
-		
+
 		struct tcp_pcb* lpcb = tcp_new();
 		if( 0 == lpcb ) return 1;
 		if( ERR_OK != tcp_bind(lpcb, IP_ADDR_ANY, srcport) ) return 1;
 		tpcb = tcp_listen(lpcb);
-		if( 0 == tpcb ) return 1;		
-		
+		if( 0 == tpcb ) return 1;
+
 		return 0;
 	}
-	
+
 	if( 0 == strcmp(s, "AT+LWIPSEND") ) {
 		if( !tpcb ) return 1;
 		_delay_ms(200);
@@ -357,39 +371,39 @@ uint8_t proc_at_cmd(const char* s)
 		if( l > 512 ) l = 512;
 		ser_puti(AT_CMD_UART, l , 10);
 		ser_puts(AT_CMD_UART, ">\r\n");
-		
+
 		uint8_t buf[l];
 		uint16_t i = 0;
-		
+
 		while( 1 ) {
 			mchdrv_poll(&mchdrv_netif);
 			sys_check_timeouts();
-			
+
 			uint8_t d;
 			if( ser_getc(AT_CMD_UART, &d) ) {
 				if( i >= l ) return 1;
-				
+
 				if( at_echo ) ser_putc(AT_CMD_UART, d);
-				
+
 				if( d == 0x7f && i ) { --i; continue; }
-				
+
 				if( d == 0x1a ) {	// Ctrl-Z
 					if( !tpcb ) return 1;
 					if( ERR_OK != tcp_write(tpcb, buf, i, TCP_WRITE_FLAG_COPY) ) return 1;
 					return 0;
 				}
-				
+
 				buf[i++] = d;
 			}
 		}
 	}
-	
+
 	if( 0 == strcmp(s, "AT+LWIPOUTPUT") ) {
 		if( !tpcb ) return 1;
 		if( ERR_OK != tcp_output(tpcb) ) return 1;
 		return 0;
 	}
-	
+
 	if( 0 == strcmp(s, "AT+LWIPCLOSE") ) {
 		if( !tpcb ) return 1;
 		struct tcp_pcb* t = tpcb;
@@ -397,7 +411,37 @@ uint8_t proc_at_cmd(const char* s)
 		if( ERR_OK != tcp_close(t) ) return 1;
 		return 0;
 	}
-	
+
+	if( 0 == strcmp(s, "AT+LWIPDNS=?") ) {
+		uint8_t i;
+		for( i = 0; i < DNS_MAX_SERVERS; ++i ) {
+			ser_putip(AT_CMD_UART, dns_getserver(i).addr);
+			ser_puts(AT_CMD_UART, "\r\n");
+		}
+		return 0;
+	}
+
+	char lwipdns[] = "AT+LWIPDNS=";
+
+	if( 0 == strncmp(s, lwipdns, strlen(lwipdns)) ) {
+		struct ip_addr ip;
+
+		s += strlen(lwipdns);
+
+		err_t r = dns_gethostbyname(s, &ip, dns_found_cb, 0);
+
+		if( ERR_OK == r ) {
+			dns_found_cb(s, &ip, 0);
+			return 0;
+		}
+
+		if( ERR_INPROGRESS == r ) {
+			return 0;
+		}
+
+		return 1;
+	}
+
 	return 1;
 }
 
@@ -410,7 +454,7 @@ int main(void)
 	if( SysTick_Config(SystemCoreClock / 1000) ) { // setup SysTick Timer for 1 msec interrupts
 		while( 1 );                                  // capture error
 	}
-	
+
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_0); // disable preemption
 	ser_init(AT_CMD_UART, 38400, uart1txbuf, sizeof(uart1txbuf), uart1rxbuf, sizeof(uart1rxbuf));
 	spi_init(ENC28_SPI, SPI_BaudRatePrescaler_128);
@@ -418,7 +462,7 @@ int main(void)
 	ser_printf_n = DBG_UART;
 	ser_init(DBG_UART, 115200, uart2txbuf, sizeof(uart2txbuf), uart2rxbuf, sizeof(uart2rxbuf));
 	#endif
-	
+
 	uint32_t* u_id = (uint32_t*)0x1ffff7e8;	// STM32 unique device ID register
 	uint32_t mac4 = *u_id ^ *(u_id + 1) ^ *(u_id + 2);
 
@@ -429,30 +473,30 @@ int main(void)
 	mchdrv_netif.hwaddr[3] = mac4 >> 16;
 	mchdrv_netif.hwaddr[4] = mac4 >> 24;
 	mchdrv_netif.hwaddr[5] = 0x02;
-	
+
 	LWIP_PLATFORM_DIAG(("mcu: reset\r\n"));
 
 	char atbuf[64];
 	uint8_t atbuflen = 0;
 	at_echo = 1;
 	lwip_init_done = 0;
-	
+
 	while( 1 ) {
 		if( lwip_init_done ) {
 			mchdrv_poll(&mchdrv_netif);
 			sys_check_timeouts();
 		}
-		
+
 		// at command processing
 		uint8_t d;
 		if( ser_getc(AT_CMD_UART, &d) ) {
-			
+
 			// echo character
 			if( at_echo ) { ser_putc(AT_CMD_UART, d); }
-			
+
 			// buffer overflow guard
 			if( atbuflen >= sizeof(atbuf) ) { atbuflen = 0; }
-			
+
 			// execute on enter
 			if( (d == '\r') || (d == '\n') ) {
 				if( atbuflen ) {
@@ -471,5 +515,5 @@ int main(void)
 				atbuf[atbuflen++] = toupper(d);
 			}
 		}
-	}	
+	}
 }
