@@ -5,7 +5,7 @@ PROJECT=main
 LIBDIR=c:\users\matej\cloudstation\arm\stm32\lib
 
 # STM32 stdperiph lib defines
-#CDEFS = -DHSE_VALUE=((uint32_t)8000000) -DSTM32F10X_MD
+#CDEFS = -DHSE_VALUE=((uint32_t)8000000) -DSTM32F10X_MD_VL
 CDEFS = -DHSE_VALUE=((uint32_t)6250000) -DSTM32F10X_MD_VL
 
 #  List of the objects files to be compiled/assembled

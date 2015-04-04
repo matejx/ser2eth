@@ -253,8 +253,21 @@ uint8_t proc_at_cmd(const char* s)
 	}
 
 	if( 0 == strcmp(s, "ATI") ) {
-		ser_puts(AT_CMD_UART, "MK ser2eth v1.1\r\n");
+		ser_puts(AT_CMD_UART, "MK ser2eth v1.2\r\n");
 		return 0;
+	}
+
+	char atipr[] = "AT+IPR=";
+
+	if( 0 == strncmp(s, atipr, strlen(atipr)) ) {
+		s += strlen(atipr);
+		uint32_t nbr = udtoi(s);
+		if( nbr % 9600 ) return 1;
+		ser_puts(AT_CMD_UART, "OK\r\n");
+		ser_wait_txe(AT_CMD_UART);
+		ser_shutdown(AT_CMD_UART);
+		ser_init(AT_CMD_UART, nbr, uart1txbuf, sizeof(uart1txbuf), uart1rxbuf, sizeof(uart1rxbuf));
+		return 2;
 	}
 
 	// lwIP init
@@ -502,11 +515,9 @@ int main(void)
 				if( atbuflen ) {
 					atbuf[atbuflen] = 0;
 					atbuflen = 0;
-					if( proc_at_cmd(atbuf) ) {
-						ser_puts(AT_CMD_UART, "ERR\r\n");
-					} else {
-						ser_puts(AT_CMD_UART, "OK\r\n");
-					}
+					uint8_t r = proc_at_cmd(atbuf);
+					if( r == 0 ) ser_puts(AT_CMD_UART, "OK\r\n");
+					if( r == 1 ) ser_puts(AT_CMD_UART, "ERR\r\n");
 				}
 			} else
 			if( d == 0x7f ) {	// backspace
