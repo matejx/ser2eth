@@ -63,6 +63,8 @@ static struct ip_addr gw = {0};
 static struct ip_addr nm = {0};
 static struct tcp_pcb* tpcb	= 0;
 
+static const uint32_t NV_VAR_ADR = 0x08000000 + (120 * 0x400);
+
 //-----------------------------------------------------------------------------
 //  enc28j60 driver required functions
 //-----------------------------------------------------------------------------
@@ -152,6 +154,47 @@ uint8_t parse_port(const char* s, uint16_t* a)
 	uint32_t port = udtoi(s);
 	if( (port < 10) || (port > 65536) ) return 1;
 	*a = port;
+	return 0;
+}
+
+uint8_t __fls_wr(uint32_t* page, uint32_t* buf, uint32_t len)
+{
+//	FLASH_ClearFlag(FLASH_FLAG_EOP | FLASH_FLAG_PGERR | FLASH_FLAG_WRPRTERR);
+
+	if( FLASH_COMPLETE != FLASH_ErasePage((uint32_t)page) ) {
+		return 1;
+	}
+
+	uint32_t i;
+
+	for( i = 0; i < len; ++i ) {
+		if( FLASH_COMPLETE != FLASH_ProgramWord((uint32_t)page, *buf) ) {
+			return 2;
+		}
+		++page;
+		++buf;
+	}
+
+	return 0;
+}
+
+uint8_t fls_wr(uint32_t* page, uint32_t* buf, uint32_t len)
+{
+	if( 0 == memcmp(page, buf, 4*len) ) {
+		return 0;
+	}
+
+	FLASH_Unlock();
+	uint8_t r = __fls_wr(page, buf, len);
+	FLASH_Lock();
+	if( r ) {
+		return r;
+	}
+
+	if( 0 != memcmp(page, buf, 4*len) ) {
+		return 10;
+	}
+
 	return 0;
 }
 
@@ -253,7 +296,7 @@ uint8_t proc_at_cmd(const char* s)
 	}
 
 	if( 0 == strcmp(s, "ATI") ) {
-		ser_puts(AT_CMD_UART, "MK ser2eth v1.2\r\n");
+		ser_puts(AT_CMD_UART, "MK ser2eth v1.3\r\n");
 		return 0;
 	}
 
@@ -321,6 +364,32 @@ uint8_t proc_at_cmd(const char* s)
 		ser_puts(AT_CMD_UART, "+LWIPGW: ");
 		ser_putip(AT_CMD_UART, mchdrv_netif.gw.addr);
 		ser_puts(AT_CMD_UART, "\r\n");
+		return 0;
+	}
+
+	if( 0 == strcmp(s, "AT+LWIPSAVE") ) {
+		uint32_t ipc[4];
+		ipc[0] = mchdrv_netif.ip_addr.addr;
+		ipc[1] = mchdrv_netif.netmask.addr;
+		ipc[2] = mchdrv_netif.gw.addr;
+		ipc[3] = dns_getserver(0).addr;
+		if( 0 ==  fls_wr((uint32_t*)NV_VAR_ADR, ipc, 4) ) {
+			return 0;
+		}
+	}
+
+	if( 0 == strcmp(s, "AT+LWIPLOAD") ) {
+		dhcp_stop(&mchdrv_netif);
+		netif_set_down(&mchdrv_netif);
+		uint32_t* ipcp = (uint32_t*)NV_VAR_ADR;
+		ip.addr = *ipcp++;
+		nm.addr = *ipcp++;
+		gw.addr = *ipcp++;
+		netif_set_addr(&mchdrv_netif, &ip, &nm, &gw);
+		netif_set_up(&mchdrv_netif);
+		struct ip_addr dns0;
+		dns0.addr = *ipcp++;
+		dns_setserver(0, &dns0);
 		return 0;
 	}
 
