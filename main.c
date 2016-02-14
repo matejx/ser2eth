@@ -296,7 +296,7 @@ uint8_t proc_at_cmd(const char* s)
 	}
 
 	if( 0 == strcmp(s, "ATI") ) {
-		ser_puts(AT_CMD_UART, "MK ser2eth v1.3\r\n");
+		ser_puts(AT_CMD_UART, "MK ser2eth v1.4\r\n");
 		return 0;
 	}
 
