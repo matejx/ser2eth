@@ -1,5 +1,5 @@
-#ifndef MAT_LWIOPTS
-#define MAT_LWIOPTS
+#ifndef MAT_LWIPOPTS
+#define MAT_LWIPOPTS
 
 // platform options
 #define NO_SYS                      1
@@ -11,7 +11,7 @@
 
 // internal memory pool sizes
 #define MEMP_NUM_PBUF               8
-#define MEMP_NUM_UDP_PCB            2
+#define MEMP_NUM_UDP_PCB            4
 #define MEMP_NUM_TCP_PCB            1
 #define MEMP_NUM_TCP_PCB_LISTEN     1
 #define MEMP_NUM_TCP_SEG            8

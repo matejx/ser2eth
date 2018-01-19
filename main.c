@@ -23,6 +23,7 @@ https://gitorious.org/enc28j60driver/enc28j60driver/source/66df3dbaa2e4ebacd58b2
 #include "lwip/init.h"
 #include "lwip/timers.h"
 #include "lwip/tcp.h"
+#include "lwip/udp.h"
 #include "lwip/dhcp.h"
 #include "lwip/dns.h"
 #include "netif/mchdrv.h"
@@ -34,6 +35,7 @@ https://gitorious.org/enc28j60driver/enc28j60driver/source/66df3dbaa2e4ebacd58b2
 
 #define ENC28_SPI 1
 #define AT_CMD_UART 1
+#define AT_CMD_BAUD 38400
 
 // Uncomment this and define LWIP_PLATFORM_ASSERT(x) and LWIP_PLATFORM_DIAG(x)
 // in arch/cc.h to use ser_printf(x) if you want debug messages
@@ -61,7 +63,8 @@ static enc_device_t mchdrv_hw;
 static struct ip_addr ip = {0};
 static struct ip_addr gw = {0};
 static struct ip_addr nm = {0};
-static struct tcp_pcb* tpcb	= 0;
+static struct tcp_pcb* tpcb = 0;
+static struct udp_pcb* upcb = 0;
 
 static const uint32_t NV_VAR_ADR = 0x08000000 + (120 * 0x400);
 
@@ -271,6 +274,13 @@ void dns_found_cb(const char *name, ip_addr_t *ipaddr, void *callback_arg)
 	ser_puts(AT_CMD_UART, "\r\n");
 }
 
+void udp_recv_callback(void *arg, struct udp_pcb *pcb, struct pbuf *p, ip_addr_t *addr, u16_t port)
+{
+	ser_putsn(AT_CMD_UART, p->payload, p->len);
+	LWIP_PLATFORM_DIAG(("udp: recv %d\r\n", p->len));
+	pbuf_free(p);
+}
+
 //-----------------------------------------------------------------------------
 //  AT command processing
 //-----------------------------------------------------------------------------
@@ -296,7 +306,7 @@ uint8_t proc_at_cmd(const char* s)
 	}
 
 	if( 0 == strcmp(s, "ATI") ) {
-		ser_puts(AT_CMD_UART, "MK ser2eth v1.4\r\n");
+		ser_puts(AT_CMD_UART, "MK ser2eth v1.5\r\n");
 		return 0;
 	}
 
@@ -315,7 +325,9 @@ uint8_t proc_at_cmd(const char* s)
 
 	// lwIP init
 
-	if( 0 == strcmp(s, "AT+LWIPINIT") ) {
+	char atlwipinit[] = "AT+LWIPINIT";
+
+	if( 0 == strcmp(s, atlwipinit) ) {
 		if( lwip_init_done ) return 1;
 		lwip_init();
 		if( 0 == netif_add(&mchdrv_netif, &ip, &nm, &gw, &mchdrv_hw, mchdrv_init, ethernet_input) ) return 1;
@@ -326,11 +338,13 @@ uint8_t proc_at_cmd(const char* s)
 	}
 
 	// all subsequent lwip commands require initialized lwip
-	if( !lwip_init_done ) return 1;
+	if( !lwip_init_done && (0 != strcmp(s, "AT?")) ) return 1;
 
 	// lwip IF commands
 
-	if( 0 == strcmp(s, "AT+LWIPMAC=?") ) {
+	char atlwipmac[] = "AT+LWIPMAC=?";
+
+	if( 0 == strcmp(s, atlwipmac) ) {
 		ser_puts(AT_CMD_UART, "+LWIPMAC: ");
 		uint8_t i;
 		for( i = 0; i < mchdrv_netif.hwaddr_len; ++i ) {
@@ -341,33 +355,43 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPDHCP") ) {
+	char atlwipdhcp[] = "AT+LWIPDHCP";
+
+	if( 0 == strcmp(s, atlwipdhcp) ) {
 		if( ERR_OK != dhcp_start(&mchdrv_netif) ) return 1;
 		return 0;
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPIP=?") ) {
+	char atlwipip[] = "AT+LWIPIP=?";
+
+	if( 0 == strcmp(s, atlwipip) ) {
 		ser_puts(AT_CMD_UART, "+LWIPIP: ");
 		ser_putip(AT_CMD_UART, mchdrv_netif.ip_addr.addr);
 		ser_puts(AT_CMD_UART, "\r\n");
 		return 0;
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPNM=?") ) {
+	char atlwipnm[] = "AT+LWIPNM=?";
+
+	if( 0 == strcmp(s, atlwipnm) ) {
 		ser_puts(AT_CMD_UART, "+LWIPNM: ");
 		ser_putip(AT_CMD_UART, mchdrv_netif.netmask.addr);
 		ser_puts(AT_CMD_UART, "\r\n");
 		return 0;
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPGW=?") ) {
+	char atlwipgw[] = "AT+LWIPGW=?";
+
+	if( 0 == strcmp(s, atlwipgw) ) {
 		ser_puts(AT_CMD_UART, "+LWIPGW: ");
 		ser_putip(AT_CMD_UART, mchdrv_netif.gw.addr);
 		ser_puts(AT_CMD_UART, "\r\n");
 		return 0;
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPSAVE") ) {
+	char atlwipsave[] = "AT+LWIPSAVE";
+
+	if( 0 == strcmp(s, atlwipsave) ) {
 		uint32_t ipc[4];
 		ipc[0] = mchdrv_netif.ip_addr.addr;
 		ipc[1] = mchdrv_netif.netmask.addr;
@@ -378,7 +402,9 @@ uint8_t proc_at_cmd(const char* s)
 		}
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPLOAD") ) {
+	char atlwipload[] = "AT+LWIPLOAD";
+
+	if( 0 == strcmp(s, atlwipload) ) {
 		dhcp_stop(&mchdrv_netif);
 		netif_set_down(&mchdrv_netif);
 		uint32_t* ipcp = (uint32_t*)NV_VAR_ADR;
@@ -395,12 +421,12 @@ uint8_t proc_at_cmd(const char* s)
 
 	// lwIP TCP commands
 
-	char lwipconnect[] = "AT+LWIPCONNECT=";
+	char attcpconnect[] = "AT+TCPCONNECT=";
 
-	if( 0 == strncmp(s, lwipconnect, strlen(lwipconnect)) ) {
+	if( 0 == strncmp(s, attcpconnect, strlen(attcpconnect)) ) {
 		if( tpcb ) return 1;
 
-		s += strlen(lwipconnect);
+		s += strlen(attcpconnect);
 		struct ip_addr ip;
 		if( parse_ip(s, &(ip.addr)) ) return 1;
 
@@ -427,12 +453,12 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char lwiplisten[] = "AT+LWIPLISTEN=";
+	char attcplisten[] = "AT+TCPLISTEN=";
 
-	if( 0 == strncmp(s, lwiplisten, strlen(lwiplisten)) ) {
+	if( 0 == strncmp(s, attcplisten, strlen(attcplisten)) ) {
 		if( tpcb ) return 1;
 
-		s += strlen(lwiplisten);
+		s += strlen(attcplisten);
 		uint16_t srcport;
 		if( parse_port(s, &srcport) ) return 1;
 
@@ -445,7 +471,9 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPSEND") ) {
+	char attcpsend[] = "AT+TCPSEND";
+
+	if( 0 == strcmp(s, attcpsend) ) {
 		if( !tpcb ) return 1;
 		_delay_ms(200);
 		ser_flush_rxbuf(AT_CMD_UART);
@@ -480,13 +508,17 @@ uint8_t proc_at_cmd(const char* s)
 		}
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPOUTPUT") ) {
+	char attcpoutput[] = "AT+TCPOUTPUT";
+
+	if( 0 == strcmp(s, attcpoutput) ) {
 		if( !tpcb ) return 1;
 		if( ERR_OK != tcp_output(tpcb) ) return 1;
 		return 0;
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPCLOSE") ) {
+	char attcpclose[] = "AT+TCPCLOSE";
+
+	if( 0 == strcmp(s, attcpclose) ) {
 		if( !tpcb ) return 1;
 		struct tcp_pcb* t = tpcb;
 		tpcb = 0;
@@ -494,7 +526,11 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	if( 0 == strcmp(s, "AT+LWIPDNS=?") ) {
+	// lwip DNS commands
+
+	char atdns[] = "AT+DNS=?";
+
+	if( 0 == strcmp(s, atdns) ) {
 		uint8_t i;
 		for( i = 0; i < DNS_MAX_SERVERS; ++i ) {
 			ser_putip(AT_CMD_UART, dns_getserver(i).addr);
@@ -503,12 +539,12 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char lwipdns[] = "AT+LWIPDNS=";
+	char atdnslookup[] = "AT+DNSLOOKUP=";
 
-	if( 0 == strncmp(s, lwipdns, strlen(lwipdns)) ) {
+	if( 0 == strncmp(s, atdnslookup, strlen(atdnslookup)) ) {
 		struct ip_addr ip;
 
-		s += strlen(lwipdns);
+		s += strlen(atdnslookup);
 
 		err_t r = dns_gethostbyname(s, &ip, dns_found_cb, 0);
 
@@ -522,6 +558,120 @@ uint8_t proc_at_cmd(const char* s)
 		}
 
 		return 1;
+	}
+
+	// lwIP UDP commands
+
+	char atudpconnect[] = "AT+UDPCONNECT=";
+
+	if( 0 == strncmp(s, atudpconnect, strlen(atudpconnect)) ) {
+	  if( upcb ) return 1;
+
+		s += strlen(atudpconnect);
+		struct ip_addr ip;
+		if( parse_ip(s, &(ip.addr)) ) return 1;
+
+		uint16_t dstport;
+		s = strchr(s, ',');
+		if( !s ) return 1;
+		++s;
+		if( parse_port(s, &dstport) ) return 1;
+
+		upcb = udp_new();
+		if( !upcb ) return 1;
+
+		if( ERR_OK != udp_connect(upcb, &ip, dstport) ) return 1;
+
+		udp_recv(upcb, udp_recv_callback, 0);
+
+		return 0;
+	}
+
+	char atudplisten[] = "AT+UDPLISTEN=";
+
+	if( 0 == strncmp(s, atudplisten, strlen(atudplisten)) ) {
+		if( upcb ) return 1;
+
+		s += strlen(atudplisten);
+		uint16_t srcport;
+		if( parse_port(s, &srcport) ) return 1;
+
+		upcb = udp_new();
+		if( !upcb ) return 1;
+
+		if( ERR_OK != udp_bind(upcb, IP_ADDR_ANY, srcport) ) return 1;
+
+		udp_recv(upcb, udp_recv_callback, 0);
+
+		return 0;
+	}
+
+	char atudpclose[] = "AT+UDPCLOSE";
+
+	if( 0 == strcmp(s, atudpclose) ) {
+		if( !upcb ) return 1;
+		udp_remove(upcb);
+		upcb = 0;
+		return 0;
+	}
+
+	char atudpsend[] = "AT+UDPSEND";
+
+	if( 0 == strcmp(s, atudpsend) ) {
+		if( !upcb ) return 1;
+		_delay_ms(50);
+		ser_flush_rxbuf(AT_CMD_UART);
+		uint16_t l = 512;
+
+		ser_puti(AT_CMD_UART, l , 10);
+		ser_puts(AT_CMD_UART, ">\r\n");
+
+		uint8_t buf[l];
+		uint16_t i = 0;
+
+		while( 1 ) {
+			mchdrv_poll(&mchdrv_netif);
+			sys_check_timeouts();
+
+			uint8_t d;
+			if( ser_getc(AT_CMD_UART, &d) ) {
+				if( i >= l ) break;
+
+				if( at_echo ) ser_putc(AT_CMD_UART, d);
+
+				if( d == 0x7f && i ) { --i; continue; }
+
+				if( d == 0x1a ) break;
+
+				buf[i++] = d;
+			}
+		}
+
+		struct pbuf* p = pbuf_alloc(PBUF_TRANSPORT, i, PBUF_REF);
+		if( 0 == p ) return 1;
+		p->payload = buf;
+		err_t e = udp_send(upcb, p);
+		pbuf_free(p);
+		if( ERR_OK != e ) return 1;
+		return 0;
+	}
+
+	// help
+
+	if( 0 == strcmp(s, "AT?") ) {
+		char* atall[] = {
+			atipr,
+			atlwipinit,atlwipmac,atlwipdhcp,atlwipip,atlwipnm,atlwipgw,atlwipsave,atlwipload,
+			attcpconnect,attcplisten,attcpsend,attcpoutput,attcpclose,
+			atdns,atdnslookup,
+			atudpconnect,atudplisten,atudpclose,atudpsend
+		};
+		uint8_t i;
+		for( i = 0; i < sizeof(atall)/sizeof(char*); ++i ) {
+			ser_puts(AT_CMD_UART, atall[i]);
+			ser_puts(AT_CMD_UART, "\r\n");
+		}
+		return 0;
 	}
 
 	return 1;
@@ -538,7 +688,7 @@ int main(void)
 	}
 
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_0); // disable preemption
-	ser_init(AT_CMD_UART, 38400, uart1txbuf, sizeof(uart1txbuf), uart1rxbuf, sizeof(uart1rxbuf));
+	ser_init(AT_CMD_UART, AT_CMD_BAUD, uart1txbuf, sizeof(uart1txbuf), uart1rxbuf, sizeof(uart1rxbuf));
 	spi_init(ENC28_SPI, SPI_BaudRatePrescaler_128);
 	#ifdef DBG_UART
 	ser_printf_n = DBG_UART;

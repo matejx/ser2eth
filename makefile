@@ -6,15 +6,18 @@ LIBDIR=c:\users\matej\cloudstation\arm\stm32\lib
 LWIPDIR=lwip-1.4.0
 
 # STM32 stdperiph lib defines
-#CDEFS = -DHSE_VALUE=((uint32_t)8000000) -DSTM32F10X_MD_VL
-CDEFS = -DHSE_VALUE=((uint32_t)6250000) -DSTM32F10X_MD_VL
+#CDEFS = -DHSE_VALUE=((uint32_t)8000000) -DSTM32F10X_MD_VL -DUSE_STDPERIPH_DRIVER
+CDEFS = -DHSE_VALUE=((uint32_t)6250000) -DSTM32F10X_MD_VL -DUSE_STDPERIPH_DRIVER
 
 #  List of the objects files to be compiled/assembled
-OBJECTS=main.o $(LIBDIR)\startup_stm32f10x_md.o
+OBJECTS=main.o
+
+CMSIS_SOURCES = \
+$(LIBDIR)\cmsis\startup_stm32f10x_md.o \
+$(LIBDIR)\cmsis\system_stm32f10x.o
+#$(LIBDIR)\cmsis\core_cm3.o
 
 STM_SOURCES = \
-$(LIBDIR)\stm32f10x\src\core_cm3.o \
-$(LIBDIR)\stm32f10x\src\system_stm32f10x.o \
 $(LIBDIR)\stm32f10x\src\stm32f10x_gpio.o \
 $(LIBDIR)\stm32f10x\src\stm32f10x_rcc.o \
 $(LIBDIR)\stm32f10x\src\stm32f10x_exti.o \
@@ -53,11 +56,12 @@ $(LWIPDIR)\src\netif\etharp.o \
 $(LWIPDIR)\src\netif\enc28j60.o \
 $(LWIPDIR)\src\netif\mchdrv.o
 
+OBJECTS+=$(CMSIS_SOURCES)
 OBJECTS+=$(STM_SOURCES)
 OBJECTS+=$(MAT_SOURCES)
 OBJECTS+=$(LWIP_SOURCES)
 
-LSCRIPT=$(LIBDIR)\stm32_flash.ld
+LSCRIPT=$(LIBDIR)\cmsis\stm32f100xb.ld
 
 OPTIMIZATION = s
 DEBUG = dwarf-2
@@ -68,7 +72,7 @@ GCFLAGS = -g$(DEBUG)
 GCFLAGS += $(CDEFS)
 GCFLAGS += -O$(OPTIMIZATION)
 GCFLAGS += -Wall -std=gnu99 -fno-common -mcpu=cortex-m3 -mthumb
-GCFLAGS += -I$(LIBDIR)\stm32f10x\inc -I$(LIBDIR)  -I$(LWIPDIR)/src/include -I$(LWIPDIR)/src/include/ipv4
+GCFLAGS += -I$(LIBDIR)\stm32f10x\inc -I$(LIBDIR)\cmsis -I$(LIBDIR) -I$(LWIPDIR)/src/include -I$(LWIPDIR)/src/include/ipv4
 #GCFLAGS += -Wcast-align -Wcast-qual -Wimplicit -Wpointer-arith -Wswitch
 #GCFLAGS += -Wredundant-decls -Wreturn-type -Wshadow -Wunused
 LDFLAGS = -mcpu=cortex-m3 -mthumb -O$(OPTIMIZATION) -Wl,-Map=$(PROJECT).map -T$(LSCRIPT)
