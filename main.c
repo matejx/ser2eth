@@ -5,7 +5,7 @@ lwIP:
 http://savannah.nongnu.org/projects/lwip/
 
 ebc28j60 driver:
-https://gitorious.org/enc28j60driver/enc28j60driver/source/66df3dbaa2e4ebacd58b2fe014cc597538a2ca9a:
+https://gitlab.com/enc28j60driver/enc28j60driver
 
 @file		main.c
 @author		Matej Kogovsek (matej@hamradio.si)
@@ -21,7 +21,7 @@ https://gitorious.org/enc28j60driver/enc28j60driver/source/66df3dbaa2e4ebacd58b2
 #include "enchw.h"
 
 #include "lwip/init.h"
-#include "lwip/timers.h"
+#include "lwip/timeouts.h"
 #include "lwip/tcp.h"
 #include "lwip/udp.h"
 #include "lwip/dhcp.h"
@@ -37,9 +37,12 @@ https://gitorious.org/enc28j60driver/enc28j60driver/source/66df3dbaa2e4ebacd58b2
 #define AT_CMD_UART 1
 #define AT_CMD_BAUD 38400
 
-// Uncomment this and define LWIP_PLATFORM_ASSERT(x) and LWIP_PLATFORM_DIAG(x)
-// in arch/cc.h to use ser_printf(x) if you want debug messages
-//#define DBG_UART 2
+// If you want debug messages, define LWIP_DEBUG 1 in lwipopts.h,
+// define LWIP_PLATFORM_ASSERT(x) and LWIP_PLATFORM_DIAG(x) in arch/cc.h to use ser_printf(x)
+// and select a DBG_UART here (can be same as AT_CMD_UART)
+#if LWIP_DEBUG
+#define DBG_UART 1
+#endif
 
 //-----------------------------------------------------------------------------
 //  Global variables
@@ -60,9 +63,9 @@ static uint8_t lwip_init_done;
 
 static struct netif mchdrv_netif;
 static enc_device_t mchdrv_hw;
-static struct ip_addr ip = {0};
-static struct ip_addr gw = {0};
-static struct ip_addr nm = {0};
+static ip_addr_t ip = {0};
+static ip_addr_t gw = {0};
+static ip_addr_t nm = {0};
 static struct tcp_pcb* tpcb = 0;
 static struct udp_pcb* upcb = 0;
 
@@ -72,7 +75,7 @@ static const uint32_t NV_VAR_ADR = 0x08000000 + (120 * 0x400);
 //  enc28j60 driver required functions
 //-----------------------------------------------------------------------------
 
-void enchw_setup(enchw_device_t *dev) {}
+void enchw_setup(enchw_device_t *dev) { spi_init(ENC28_SPI, SPI_BaudRatePrescaler_128); }
 void enchw_select(enchw_device_t *dev) { spi_cs(ENC28_SPI, 0); }
 void enchw_unselect(enchw_device_t *dev) { spi_cs(ENC28_SPI, 1); }
 uint8_t enchw_exchangebyte(enchw_device_t *dev, uint8_t byte) { return spi_rw(ENC28_SPI, byte); };
@@ -263,7 +266,7 @@ void mch_status_callback(struct netif *netif)
 	ser_puts(AT_CMD_UART, "+LWIP: IFSTAT\r\n");
 }
 
-void dns_found_cb(const char *name, ip_addr_t *ipaddr, void *callback_arg)
+void dns_found_cb(const char *name, const ip_addr_t *ipaddr, void *callback_arg)
 {
 	ser_puts(AT_CMD_UART, "+LWIPDNS: ");
 	if( ipaddr ) {
@@ -274,7 +277,7 @@ void dns_found_cb(const char *name, ip_addr_t *ipaddr, void *callback_arg)
 	ser_puts(AT_CMD_UART, "\r\n");
 }
 
-void udp_recv_callback(void *arg, struct udp_pcb *pcb, struct pbuf *p, ip_addr_t *addr, u16_t port)
+void udp_recv_callback(void *arg, struct udp_pcb *pcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
 	ser_putsn(AT_CMD_UART, p->payload, p->len);
 	LWIP_PLATFORM_DIAG(("udp: recv %d\r\n", p->len));
@@ -306,7 +309,7 @@ uint8_t proc_at_cmd(const char* s)
 	}
 
 	if( 0 == strcmp(s, "ATI") ) {
-		ser_puts(AT_CMD_UART, "MK ser2eth v1.5\r\n");
+		ser_puts(AT_CMD_UART, "MK ser2eth v1.6\r\n");
 		return 0;
 	}
 
@@ -323,6 +326,16 @@ uint8_t proc_at_cmd(const char* s)
 		return 2;
 	}
 
+	// lwIP version
+
+	char atlwipver[] = "AT+LWIPVER";
+
+	if( 0 == strcmp(s, atlwipver) ) {
+		ser_puts(AT_CMD_UART, LWIP_VERSION_STRING);
+		ser_puts(AT_CMD_UART, "\r\n");
+		return 0;
+	}
+
 	// lwIP init
 
 	char atlwipinit[] = "AT+LWIPINIT";
@@ -333,6 +346,7 @@ uint8_t proc_at_cmd(const char* s)
 		if( 0 == netif_add(&mchdrv_netif, &ip, &nm, &gw, &mchdrv_hw, mchdrv_init, ethernet_input) ) return 1;
 		netif_set_default(&mchdrv_netif);
 		netif_set_status_callback(&mchdrv_netif, mch_status_callback);
+		netif_set_up(&mchdrv_netif);
 		lwip_init_done = 1;
 		return 0;
 	}
@@ -396,7 +410,7 @@ uint8_t proc_at_cmd(const char* s)
 		ipc[0] = mchdrv_netif.ip_addr.addr;
 		ipc[1] = mchdrv_netif.netmask.addr;
 		ipc[2] = mchdrv_netif.gw.addr;
-		ipc[3] = dns_getserver(0).addr;
+		ipc[3] = dns_getserver(0)->addr;
 		if( 0 ==  fls_wr((uint32_t*)NV_VAR_ADR, ipc, 4) ) {
 			return 0;
 		}
@@ -413,7 +427,7 @@ uint8_t proc_at_cmd(const char* s)
 		gw.addr = *ipcp++;
 		netif_set_addr(&mchdrv_netif, &ip, &nm, &gw);
 		netif_set_up(&mchdrv_netif);
-		struct ip_addr dns0;
+		ip_addr_t dns0;
 		dns0.addr = *ipcp++;
 		dns_setserver(0, &dns0);
 		return 0;
@@ -427,7 +441,7 @@ uint8_t proc_at_cmd(const char* s)
 		if( tpcb ) return 1;
 
 		s += strlen(attcpconnect);
-		struct ip_addr ip;
+		ip_addr_t ip;
 		if( parse_ip(s, &(ip.addr)) ) return 1;
 
 		uint16_t dstport;
@@ -533,7 +547,7 @@ uint8_t proc_at_cmd(const char* s)
 	if( 0 == strcmp(s, atdns) ) {
 		uint8_t i;
 		for( i = 0; i < DNS_MAX_SERVERS; ++i ) {
-			ser_putip(AT_CMD_UART, dns_getserver(i).addr);
+			ser_putip(AT_CMD_UART, dns_getserver(i)->addr);
 			ser_puts(AT_CMD_UART, "\r\n");
 		}
 		return 0;
@@ -542,7 +556,7 @@ uint8_t proc_at_cmd(const char* s)
 	char atdnslookup[] = "AT+DNSLOOKUP=";
 
 	if( 0 == strncmp(s, atdnslookup, strlen(atdnslookup)) ) {
-		struct ip_addr ip;
+		ip_addr_t ip;
 
 		s += strlen(atdnslookup);
 
@@ -568,7 +582,7 @@ uint8_t proc_at_cmd(const char* s)
 	  if( upcb ) return 1;
 
 		s += strlen(atudpconnect);
-		struct ip_addr ip;
+		ip_addr_t ip;
 		if( parse_ip(s, &(ip.addr)) ) return 1;
 
 		uint16_t dstport;
@@ -661,7 +675,7 @@ uint8_t proc_at_cmd(const char* s)
 	if( 0 == strcmp(s, "AT?") ) {
 		char* atall[] = {
 			atipr,
-			atlwipinit,atlwipmac,atlwipdhcp,atlwipip,atlwipnm,atlwipgw,atlwipsave,atlwipload,
+			atlwipver,atlwipinit,atlwipmac,atlwipdhcp,atlwipip,atlwipnm,atlwipgw,atlwipsave,atlwipload,
 			attcpconnect,attcplisten,attcpsend,attcpoutput,attcpclose,
 			atdns,atdnslookup,
 			atudpconnect,atudplisten,atudpclose,atudpsend
@@ -689,10 +703,11 @@ int main(void)
 
 	NVIC_PriorityGroupConfig(NVIC_PriorityGroup_0); // disable preemption
 	ser_init(AT_CMD_UART, AT_CMD_BAUD, uart1txbuf, sizeof(uart1txbuf), uart1rxbuf, sizeof(uart1rxbuf));
-	spi_init(ENC28_SPI, SPI_BaudRatePrescaler_128);
 	#ifdef DBG_UART
-	ser_printf_n = DBG_UART;
+	ser_printf_devnum = DBG_UART;
+	#if DBG_UART != AT_CMD_UART
 	ser_init(DBG_UART, 115200, uart2txbuf, sizeof(uart2txbuf), uart2rxbuf, sizeof(uart2rxbuf));
+	#endif
 	#endif
 
 	uint32_t* u_id = (uint32_t*)0x1ffff7e8;	// STM32 unique device ID register
