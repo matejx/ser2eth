@@ -8,7 +8,7 @@ ebc28j60 driver:
 https://gitlab.com/enc28j60driver/enc28j60driver
 
 @file		main.c
-@author		Matej Kogovsek (matej@hamradio.si)
+@author		Matej Kogovsek
 @copyright	GPL v2
 */
 
@@ -75,7 +75,7 @@ static const uint32_t NV_VAR_ADR = 0x08000000 + (120 * 0x400);
 //  enc28j60 driver required functions
 //-----------------------------------------------------------------------------
 
-void enchw_setup(enchw_device_t *dev) { spi_init(ENC28_SPI, SPI_BaudRatePrescaler_128); }
+void enchw_setup(enchw_device_t *dev) { spi_init(ENC28_SPI, SPI_BaudRatePrescaler_128, 0); }
 void enchw_select(enchw_device_t *dev) { spi_cs(ENC28_SPI, 0); }
 void enchw_unselect(enchw_device_t *dev) { spi_cs(ENC28_SPI, 1); }
 uint8_t enchw_exchangebyte(enchw_device_t *dev, uint8_t byte) { return spi_rw(ENC28_SPI, byte); };
@@ -87,7 +87,7 @@ uint8_t enchw_exchangebyte(enchw_device_t *dev, uint8_t byte) { return spi_rw(EN
 void _exit(int status)
 {
 	ser_printf("_exit called!\r\n");
-	while(1) {}
+	while( 1 );
 }
 
 //-----------------------------------------------------------------------------
@@ -308,12 +308,14 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
+	const char atiresp[] = "MK ser2eth v1.6\r\n";
+
 	if( 0 == strcmp(s, "ATI") ) {
-		ser_puts(AT_CMD_UART, "MK ser2eth v1.6\r\n");
+		ser_puts(AT_CMD_UART, atiresp);
 		return 0;
 	}
 
-	char atipr[] = "AT+IPR=";
+	const char atipr[] = "AT+IPR=";
 
 	if( 0 == strncmp(s, atipr, strlen(atipr)) ) {
 		s += strlen(atipr);
@@ -328,7 +330,7 @@ uint8_t proc_at_cmd(const char* s)
 
 	// lwIP version
 
-	char atlwipver[] = "AT+LWIPVER";
+	const char atlwipver[] = "AT+LWIPVER";
 
 	if( 0 == strcmp(s, atlwipver) ) {
 		ser_puts(AT_CMD_UART, LWIP_VERSION_STRING);
@@ -338,7 +340,7 @@ uint8_t proc_at_cmd(const char* s)
 
 	// lwIP init
 
-	char atlwipinit[] = "AT+LWIPINIT";
+	const char atlwipinit[] = "AT+LWIPINIT";
 
 	if( 0 == strcmp(s, atlwipinit) ) {
 		if( lwip_init_done ) return 1;
@@ -369,14 +371,14 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char atlwipdhcp[] = "AT+LWIPDHCP";
+	const char atlwipdhcp[] = "AT+LWIPDHCP";
 
 	if( 0 == strcmp(s, atlwipdhcp) ) {
 		if( ERR_OK != dhcp_start(&mchdrv_netif) ) return 1;
 		return 0;
 	}
 
-	char atlwipip[] = "AT+LWIPIP=?";
+	const char atlwipip[] = "AT+LWIPIP=?";
 
 	if( 0 == strcmp(s, atlwipip) ) {
 		ser_puts(AT_CMD_UART, "+LWIPIP: ");
@@ -385,7 +387,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char atlwipnm[] = "AT+LWIPNM=?";
+	const char atlwipnm[] = "AT+LWIPNM=?";
 
 	if( 0 == strcmp(s, atlwipnm) ) {
 		ser_puts(AT_CMD_UART, "+LWIPNM: ");
@@ -394,7 +396,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char atlwipgw[] = "AT+LWIPGW=?";
+	const char atlwipgw[] = "AT+LWIPGW=?";
 
 	if( 0 == strcmp(s, atlwipgw) ) {
 		ser_puts(AT_CMD_UART, "+LWIPGW: ");
@@ -403,7 +405,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char atlwipsave[] = "AT+LWIPSAVE";
+	const char atlwipsave[] = "AT+LWIPSAVE";
 
 	if( 0 == strcmp(s, atlwipsave) ) {
 		uint32_t ipc[4];
@@ -416,7 +418,7 @@ uint8_t proc_at_cmd(const char* s)
 		}
 	}
 
-	char atlwipload[] = "AT+LWIPLOAD";
+	const char atlwipload[] = "AT+LWIPLOAD";
 
 	if( 0 == strcmp(s, atlwipload) ) {
 		dhcp_stop(&mchdrv_netif);
@@ -435,7 +437,7 @@ uint8_t proc_at_cmd(const char* s)
 
 	// lwIP TCP commands
 
-	char attcpconnect[] = "AT+TCPCONNECT=";
+	const char attcpconnect[] = "AT+TCPCONNECT=";
 
 	if( 0 == strncmp(s, attcpconnect, strlen(attcpconnect)) ) {
 		if( tpcb ) return 1;
@@ -467,7 +469,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char attcplisten[] = "AT+TCPLISTEN=";
+	const char attcplisten[] = "AT+TCPLISTEN=";
 
 	if( 0 == strncmp(s, attcplisten, strlen(attcplisten)) ) {
 		if( tpcb ) return 1;
@@ -485,7 +487,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char attcpsend[] = "AT+TCPSEND";
+	const char attcpsend[] = "AT+TCPSEND";
 
 	if( 0 == strcmp(s, attcpsend) ) {
 		if( !tpcb ) return 1;
@@ -522,7 +524,7 @@ uint8_t proc_at_cmd(const char* s)
 		}
 	}
 
-	char attcpoutput[] = "AT+TCPOUTPUT";
+	const char attcpoutput[] = "AT+TCPOUTPUT";
 
 	if( 0 == strcmp(s, attcpoutput) ) {
 		if( !tpcb ) return 1;
@@ -530,7 +532,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char attcpclose[] = "AT+TCPCLOSE";
+	const char attcpclose[] = "AT+TCPCLOSE";
 
 	if( 0 == strcmp(s, attcpclose) ) {
 		if( !tpcb ) return 1;
@@ -542,7 +544,7 @@ uint8_t proc_at_cmd(const char* s)
 
 	// lwip DNS commands
 
-	char atdns[] = "AT+DNS=?";
+	const char atdns[] = "AT+DNS=?";
 
 	if( 0 == strcmp(s, atdns) ) {
 		uint8_t i;
@@ -553,7 +555,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char atdnslookup[] = "AT+DNSLOOKUP=";
+	const char atdnslookup[] = "AT+DNSLOOKUP=";
 
 	if( 0 == strncmp(s, atdnslookup, strlen(atdnslookup)) ) {
 		ip_addr_t ip;
@@ -576,7 +578,7 @@ uint8_t proc_at_cmd(const char* s)
 
 	// lwIP UDP commands
 
-	char atudpconnect[] = "AT+UDPCONNECT=";
+	const char atudpconnect[] = "AT+UDPCONNECT=";
 
 	if( 0 == strncmp(s, atudpconnect, strlen(atudpconnect)) ) {
 	  if( upcb ) return 1;
@@ -601,7 +603,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char atudplisten[] = "AT+UDPLISTEN=";
+	const char atudplisten[] = "AT+UDPLISTEN=";
 
 	if( 0 == strncmp(s, atudplisten, strlen(atudplisten)) ) {
 		if( upcb ) return 1;
@@ -620,7 +622,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char atudpclose[] = "AT+UDPCLOSE";
+	const char atudpclose[] = "AT+UDPCLOSE";
 
 	if( 0 == strcmp(s, atudpclose) ) {
 		if( !upcb ) return 1;
@@ -629,7 +631,7 @@ uint8_t proc_at_cmd(const char* s)
 		return 0;
 	}
 
-	char atudpsend[] = "AT+UDPSEND";
+	const char atudpsend[] = "AT+UDPSEND";
 
 	if( 0 == strcmp(s, atudpsend) ) {
 		if( !upcb ) return 1;
@@ -673,7 +675,7 @@ uint8_t proc_at_cmd(const char* s)
 	// help
 
 	if( 0 == strcmp(s, "AT?") ) {
-		char* atall[] = {
+		const char* const atall[] = {
 			atipr,
 			atlwipver,atlwipinit,atlwipmac,atlwipdhcp,atlwipip,atlwipnm,atlwipgw,atlwipsave,atlwipload,
 			attcpconnect,attcplisten,attcpsend,attcpoutput,attcpclose,
